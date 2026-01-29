@@ -15,6 +15,9 @@ import (
 	"time"
 )
 
+// httpxTimeout is used for alive filtering with httpx-toolkit (e.g. "10s")
+var httpxTimeout = "10s"
+
 func intro() {
 	art := `______                     _____                 _           _____       
 | ___ \                   /  __ \               | |         |  __ \      
@@ -226,14 +229,10 @@ func enumerateSubdomains(domain, outputDir string, progress *ReconProgress) erro
 	count, _ := countLines(subdomainFile)
 	fmt.Printf("  - Found %d subdomains\n", count)
 
-	// Filter with httpx to get only 200 OK responses
+	// Filter with httpx to get only 200 OK responses (use timeout to avoid hangs)
 	fmt.Println("  - Filtering live subdomains with httpx (200 OK only)...")
-	err = runCommand("httpx-toolkit", []string{
-		"-l", subdomainFile,
-		"-mc", "200",
-		"-silent",
-		"-o", subdomainLiveFile,
-	}, "")
+	cmd := fmt.Sprintf("timeout %s httpx-toolkit -l %s -mc 200 -silent -o %s", httpxTimeout, subdomainFile, subdomainLiveFile)
+	err = runShellCommand(cmd, "")
 	if err != nil {
 		fmt.Printf("  [!] Warning: httpx filtering failed: %v\n", err)
 	}
@@ -290,14 +289,10 @@ func collectURLs(domain, outputDir string, progress *ReconProgress) error {
 		return fmt.Errorf("uro filtering failed: %v", err)
 	}
 
-	// Filter URLs with httpx to get only 200 OK responses
+	// Filter URLs with httpx to get only 200 OK responses (use timeout to avoid hangs)
 	fmt.Println("  - Filtering URLs with httpx (200 OK only)...")
-	err = runCommand("httpx-toolkit", []string{
-		"-l", uroOutput,
-		"-mc", "200",
-		"-silent",
-		"-o", urlsFile,
-	}, "")
+	cmd = fmt.Sprintf("timeout %s httpx-toolkit -l %s -mc 200 -silent -o %s", httpxTimeout, uroOutput, urlsFile)
+	err = runShellCommand(cmd, "")
 	if err != nil {
 		return fmt.Errorf("httpx filtering failed: %v", err)
 	}
@@ -344,6 +339,7 @@ func findDirectories(domain, outputDir string, progress *ReconProgress) error {
 
 	// Use feroxbuster and dirsearch on subdomains
 	tempFiles := []string{}
+	var err error
 
 	for i, target := range subdomains {
 		if i >= 5 { // Limit to first 5 targets for demo
@@ -355,7 +351,7 @@ func findDirectories(domain, outputDir string, progress *ReconProgress) error {
 		tempFiles = append(tempFiles, feroxOutput)
 
 		// Run feroxbuster (basic scan)
-		err := runCommand("feroxbuster", []string{
+		err = runCommand("feroxbuster", []string{
 			"-u", target,
 			"-o", feroxOutput,
 			"--silent",
@@ -374,14 +370,10 @@ func findDirectories(domain, outputDir string, progress *ReconProgress) error {
 		dirFileTmp)
 	runShellCommand(cmd, "")
 
-	// Filter with httpx to get only 200 OK responses
+	// Filter with httpx to get only 200 OK responses (use timeout to avoid hangs)
 	fmt.Println("  - Filtering directories with httpx (200 OK only)...")
-	err := runCommand("httpx-toolkit", []string{
-		"-l", dirFileTmp,
-		"-mc", "200",
-		"-silent",
-		"-o", dirFile,
-	}, "")
+	cmd = fmt.Sprintf("timeout %s httpx-toolkit -l %s -mc 200 -silent -o %s", httpxTimeout, dirFileTmp, dirFile)
+	err = runShellCommand(cmd, "")
 	if err != nil {
 		fmt.Printf("  [!] Warning: httpx filtering failed: %v\n", err)
 	}
@@ -436,12 +428,8 @@ func extractGFPatterns(domain, outputDir string, progress *ReconProgress) error 
 		count, _ := countLines(gfFileTmp)
 		if count > 0 {
 			fmt.Println("  - Filtering GF patterns with httpx (200 OK only)...")
-			err := runCommand("httpx-toolkit", []string{
-				"-l", gfFileTmp,
-				"-mc", "200",
-				"-silent",
-				"-o", gfFile,
-			}, "")
+			cmd := fmt.Sprintf("timeout %s httpx-toolkit -l %s -mc 200 -silent -o %s", httpxTimeout, gfFileTmp, gfFile)
+			err := runShellCommand(cmd, "")
 			if err != nil {
 				fmt.Printf("  [!] Warning: httpx filtering failed: %v\n", err)
 			}
@@ -488,12 +476,8 @@ func extractJSFiles(domain, outputDir string, progress *ReconProgress) error {
 	tmpCount, _ := countLines(jsFileTmp)
 	if tmpCount > 0 {
 		fmt.Println("  - Filtering JS files with httpx (200 OK only)...")
-		err = runCommand("httpx-toolkit", []string{
-			"-l", jsFileTmp,
-			"-mc", "200",
-			"-silent",
-			"-o", jsFile,
-		}, "")
+		cmd := fmt.Sprintf("timeout %s httpx-toolkit -l %s -mc 200 -silent -o %s", httpxTimeout, jsFileTmp, jsFile)
+		err = runShellCommand(cmd, "")
 		if err != nil {
 			fmt.Printf("  [!] Warning: httpx filtering failed: %v\n", err)
 		}
@@ -597,9 +581,13 @@ func main() {
 	// Define flags
 	urlPtr := flag.String("url", "", "Target domain (e.g., example.com)")
 	listPtr := flag.String("l", "", "File containing list of domains")
+	timeoutPtr := flag.String("timeout", "10s", "Timeout for alive filtering (e.g., 10s)")
 
 	// Parse flags
 	flag.Parse()
+
+	// Apply timeout setting for httpx filtering
+	httpxTimeout = *timeoutPtr
 
 	// Show intro
 	intro()
